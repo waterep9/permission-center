@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>权限中心 · 管理控制台</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1f2329; --muted:#8a919f;
+          --primary:#2f6bff; --border:#e6e8eb; --danger:#e5484d; --ok:#18a058; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { background:var(--card); border-bottom:1px solid var(--border);
+           padding:14px 24px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:18px; margin:0; }
+  .container { max-width:1100px; margin:24px auto; padding:0 24px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px;
+          padding:20px; margin-bottom:20px; }
+  .card h2 { font-size:15px; margin:0 0 14px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input,select,textarea { width:100%; padding:8px 10px; border:1px solid var(--border);
+          border-radius:6px; font-size:14px; }
+  textarea { font-family:monospace; }
+  button { background:var(--primary); color:#fff; border:none; border-radius:6px;
+           padding:9px 16px; font-size:14px; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--text); border:1px solid var(--border); }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > * { flex:1; min-width:160px; }
+  pre { background:#0f172a; color:#d7f9d9; padding:14px; border-radius:8px;
+        font-size:13px; overflow:auto; max-height:320px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; }
+  .badge.allow { background:#e6f7ee; color:var(--ok); }
+  .badge.deny { background:#fdebec; color:var(--danger); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  .msg { font-size:13px; margin-top:10px; }
+  .msg.err { color:var(--danger); }
+  .msg.ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔐 权限中心 · 管理控制台</h1>
+  <span style="color:var(--muted);font-size:13px">RBAC + ABAC 混合授权</span>
+  <span id="tokenState" style="margin-left:auto;font-size:12px;color:var(--muted)">未登录</span>
+</header>
+
+<div class="container">
+  <div class="card">
+    <h2>登录</h2>
+    <div class="row">
+      <div><label>用户名</label><input id="loginUser" value="admin" placeholder="admin"></div>
+      <div><label>密码</label><input id="loginPass" type="password" placeholder="密码"></div>
+    </div>
+    <div style="margin-top:12px"><button onclick="doLogin()">登录</button></div>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>权限决策测试</h2>
+    <div class="row">
+      <div><label>用户 ID</label><input id="dUser" value="1"></div>
+      <div><label>资源 (resource)</label><input id="dResource" value="order"></div>
+      <div><label>动作 (action)</label><input id="dAction" value="read"></div>
+    </div>
+    <label>资源属性 (JSON)</label>
+    <textarea id="dResAttr" rows="2">{"owner_id":1,"sensitive":false,"dept":"eng"}</textarea>
+    <div style="margin-top:12px"><button onclick="doDecide()">执行决策</button></div>
+    <div id="decideMsg" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>审计日志（最近）</h2>
+    <button class="secondary" onclick="loadAudit()">刷新</button>
+    <table id="auditTable" style="margin-top:12px">
+      <thead><tr><th>主体</th><th>资源</th><th>动作</th><th>决策</th><th>原因</th><th>时间</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem('pc_token') || '';
+const API = '/api/v1';
+function setToken(t){ token=t; localStorage.setItem('pc_token',t);
+  document.getElementById('tokenState').textContent = t?'已登录':'未登录'; }
+setToken(token);
+async function api(path, opts={}) {
+  const headers = {'Content-Type':'application/json'};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API+path, {...opts, headers});
+  if (res.status === 401) { document.getElementById('loginMsg').textContent='令牌失效，请重新登录'; }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+async function doLogin(){
+  try {
+    const r = await fetch(API+'/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:document.getElementById('loginUser').value,
+        password:document.getElementById('loginPass').value})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'登录失败');
+    setToken(d.access_token);
+    document.getElementById('loginMsg').className='msg ok';
+    document.getElementById('loginMsg').textContent='登录成功';
+  } catch(e){ document.getElementById('loginMsg').className='msg err';
+    document.getElementById('loginMsg').textContent=e.message; }
+}
+async function doDecide(){
+  try {
+    const body = {user_id:+document.getElementById('dUser').value,
+      resource:document.getElementById('dResource').value,
+      action:document.getElementById('dAction').value,
+      resource_attributes:JSON.parse(document.getElementById('dResAttr').value||'{}')};
+    const d = await api('/decide',{method:'POST',body:JSON.stringify(body)});
+    document.getElementById('decideMsg').className='msg ok';
+    document.getElementById('decideMsg').innerHTML =
+      `决策：<span class="badge ${d.allow?'allow':'deny'}">${d.allow?'ALLOW':'DENY'}</span> `+
+      `原因：${d.reason} · 命中角色：${d.matched_roles.join(',')||'无'} · 命中策略：${d.matched_policies.join(',')||'无'}`;
+    loadAudit();
+  } catch(e){ document.getElementById('decideMsg').className='msg err';
+    document.getElementById('decideMsg').textContent=e.message; }
+}
+async function loadAudit(){
+  try {
+    const rows = await api('/audit?limit=20');
+    const tb = document.querySelector('#auditTable tbody');
+    tb.innerHTML = rows.map(r=>`<tr><td>${r.subject}</td><td>${r.resource}</td>
+      <td>${r.action}</td><td><span class="badge ${r.decision}">${r.decision}</span></td>
+      <td>${r.reason}</td><td>${r.created_at}</td></tr>`).join('');
+  } catch(e){}
+}
+loadAudit();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  permission-center:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./permission.db
+      - JWT_SECRET=please-change-me
+      - AUDIT_ENABLED=true
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
